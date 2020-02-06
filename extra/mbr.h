@@ -58,6 +58,7 @@
 #define	DOSPTYP_APPLE_UFS	0xa8	/* Apple Mac OS X boot */
 #define	DOSPTYP_APPLE_BOOT	0xab	/* Apple Mac OS X UFS */
 #define	DOSPTYP_HFS	0xaf	/* HFS/HFS+ partition type */
+#define	DOSPTYP_LINUX_EXT_BOOT	0xea	/* Linux extended boot */
 #define	DOSPTYP_PMBR	0xee	/* GPT Protective MBR */
 #define	DOSPTYP_EFI	0xef	/* EFI FAT parition */
 #define	DOSPTYP_VMFS	0xfb	/* VMware VMFS partition */

@@ -57,6 +57,20 @@ static struct {
 	{ "mbr", ALIAS_MBR },
 	{ "ntfs", ALIAS_NTFS },
 	{ "prepboot", ALIAS_PPCBOOT },
+   { "linux", ALIAS_LINUX},
+   { "linux-x86", ALIAS_LINUX_ROOT_X86},
+   { "linux-x86-64", ALIAS_LINUX_ROOT_X86_64},
+   { "linux-arm32", ALIAS_LINUX_ROOT_ARM32},
+   { "linux-arm64", ALIAS_LINUX_ROOT_ARM64},
+   { "linux-ia64", ALIAS_LINUX_ROOT_IA64},
+   { "linux-reserved", ALIAS_LINUX_RESERVED},
+   { "linux-home", ALIAS_LINUX_HOME},
+   { "linux-raid", ALIAS_LINUX_RAID},
+   { "linux-lvm", ALIAS_LINUX_LVM},
+   { "linux-ext-boot", ALIAS_LINUX_EXTENDED_BOOT},
+   { "linux-swap", ALIAS_LINUX_SWAP},
+   { "linux-data", ALIAS_LINUX_DATA},
+   { "linux-server-data", ALIAS_LINUX_SERVER_DATA},
 	{ NULL, ALIAS_NONE }		/* Keep last! */
 };
 
