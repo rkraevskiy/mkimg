@@ -111,14 +111,12 @@ vtoc8_type_lookup(const char *name)
 
    alias = scheme_get_alias(name);
 
-	printf("Alias %p ",alias);
    if (alias){
 		val = ALIAS_TYPE2INT(alias->type);
    }else{
 		if (0 != parse_uint32(&val, 0, 0xffff, name)){
          return NULL;
       }
-		printf("Errno '%s'->%d\n",name,errno);
    }
 
 	res = malloc(sizeof(*res));

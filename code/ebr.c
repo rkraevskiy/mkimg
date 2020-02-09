@@ -121,20 +121,18 @@ static void *
 ebr_type_lookup(const char *name)
 {
 	uint32_t val;
-   const struct mkimg_alias *alias;
-   unsigned long *res;
+	const struct mkimg_alias *alias;
+	unsigned long *res;
 
-   alias = scheme_get_alias(name);
+	alias = scheme_get_alias(name);
 
-	printf("Alias %p ",alias);
-   if (alias){
+	if (alias){
 		val = ALIAS_TYPE2INT(alias->type);
-   }else{
+	}else{
 		if (0 != parse_uint32(&val, 0, 0xff, name)){
-         return NULL;
-      }
-		printf("Errno '%s'->%d\n",name,errno);
-   }
+			return NULL;
+		}
+	}
 
 	res = malloc(sizeof(*res));
 

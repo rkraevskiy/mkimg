@@ -107,17 +107,17 @@ static void *
 apm_type_lookup(const char *name)
 {
 
-   const void *data;
-   const struct mkimg_alias *alias;
+	const void *data;
+	const struct mkimg_alias *alias;
 	void *res;
 
-   alias = scheme_get_alias(name);
+	alias = scheme_get_alias(name);
 
-   if (alias){
+	if (alias){
 		data = ALIAS_TYPE2PTR(alias->type);
-   }else{
-      data = name;
-   }
+	}else{
+		data = name;
+	}
 
 	if (strlen(data) >= APM_ENT_TYPELEN){
 		return NULL;
