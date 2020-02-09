@@ -86,7 +86,7 @@ ebr_write(lba_t imgsz __unused, void *bootcode __unused)
 		size = round_track(part->size);
 		dp = (void *)(ebr + DOSPARTOFF);
 		ebr_chs(&dp->dp_scyl, &dp->dp_shd, &dp->dp_ssect, nsecs);
-		dp->dp_typ = ALIAS_TYPE2INT(part->type);
+		dp->dp_typ = *((unsigned char*)part->type);
 		ebr_chs(&dp->dp_ecyl, &dp->dp_ehd, &dp->dp_esect,
 		    part->block + size - 1);
 		le32enc(&dp->dp_start, nsecs);
@@ -117,10 +117,40 @@ ebr_write(lba_t imgsz __unused, void *bootcode __unused)
 	return (error);
 }
 
+static void *
+ebr_type_lookup(const char *name)
+{
+	uint32_t val;
+   const struct mkimg_alias *alias;
+   unsigned long *res;
+
+   alias = scheme_get_alias(name);
+
+	printf("Alias %p ",alias);
+   if (alias){
+		val = ALIAS_TYPE2INT(alias->type);
+   }else{
+		if (0 != parse_uint32(&val, 0, 0xff, name)){
+         return NULL;
+      }
+		printf("Errno '%s'->%d\n",name,errno);
+   }
+
+	res = malloc(sizeof(*res));
+
+	if (!res){
+		return NULL;
+	}
+
+	*res = (unsigned long)val;
+	return res;
+}
+
 static struct mkimg_scheme ebr_scheme = {
 	.name = "ebr",
 	.description = "Extended Boot Record",
 	.aliases = ebr_aliases,
+	.type_lookup = ebr_type_lookup,
 	.metadata = ebr_metadata,
 	.write = ebr_write,
 	.nparts = 4096,

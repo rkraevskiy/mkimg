@@ -105,7 +105,7 @@ mbr_write(lba_t imgsz __unused, void *bootcode)
 			    (part->index == 0 && bootcode != NULL) ? 0x80 : 0;
 		mbr_chs(&dp->dp_scyl, &dp->dp_shd, &dp->dp_ssect,
 		    part->block);
-		dp->dp_typ = ALIAS_TYPE2INT(part->type);
+		dp->dp_typ = *((unsigned char*)part->type);
 		mbr_chs(&dp->dp_ecyl, &dp->dp_ehd, &dp->dp_esect,
 		    part->block + size - 1);
 		le32enc(&dp->dp_start, part->block);
@@ -116,10 +116,41 @@ mbr_write(lba_t imgsz __unused, void *bootcode)
 	return (error);
 }
 
+static void *
+mbr_type_lookup(const char *name)
+{
+
+	uint32_t val;
+   const struct mkimg_alias *alias;
+   unsigned long *res;
+
+   alias = scheme_get_alias(name);
+
+	printf("Alias %p ",alias);
+   if (alias){
+		val = ALIAS_TYPE2INT(alias->type);
+   }else{
+		if (0 != parse_uint32(&val, 0, 0xff, name)){
+         return NULL;
+      }
+		printf("Errno '%s'->%d\n",name,errno);
+   }
+
+	res = malloc(sizeof(*res));
+
+	if (!res){
+		return NULL;
+	}
+
+	*res = (unsigned long)val;
+	return res;
+}
+
 static struct mkimg_scheme mbr_scheme = {
 	.name = "mbr",
 	.description = "Master Boot Record",
 	.aliases = mbr_aliases,
+	.type_lookup = mbr_type_lookup,
 	.metadata = mbr_metadata,
 	.write = mbr_write,
 	.bootcode = 512,

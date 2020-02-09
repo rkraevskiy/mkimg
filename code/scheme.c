@@ -163,27 +163,19 @@ scheme_bootcode(int fd)
 }
 
 int
-scheme_check_part(struct part *p)
+scheme_check_update_part(struct part *p)
 {
-	struct mkimg_alias *iter;
-	enum alias alias;
+   void *type;
 
 	assert(scheme != NULL);
 
 	/* Check the partition type alias */
-	alias = scheme_parse_alias(p->alias);
-	if (alias == ALIAS_NONE)
+   type = scheme->type_lookup(p->alias);
+   if (!type){
 		return (EINVAL);
-
-	iter = scheme->aliases;
-	while (iter->alias != ALIAS_NONE) {
-		if (alias == iter->alias)
-			break;
-		iter++;
 	}
-	if (iter->alias == ALIAS_NONE)
-		return (EINVAL);
-	p->type = iter->type;
+
+	p->type = type;
 
 	/* Validate the optional label. */
 	if (p->label != NULL) {
@@ -221,3 +213,27 @@ scheme_write(lba_t end)
 
 	return ((scheme == NULL) ? 0 : scheme->write(end, bootcode));
 }
+
+const struct mkimg_alias *
+scheme_get_alias(const char *name)
+{
+	enum alias alias;
+	struct mkimg_alias *iter;
+
+	/* Check the partition type alias */
+	alias = scheme_parse_alias(name);
+	if (alias == ALIAS_NONE)
+		return (NULL);
+
+	iter = scheme->aliases;
+	while (iter->alias != ALIAS_NONE) {
+		if (alias == iter->alias)
+			break;
+		iter++;
+	}
+	if (iter->alias == ALIAS_NONE)
+		return (NULL);
+
+   return (iter);
+}
+

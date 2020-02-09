@@ -33,6 +33,7 @@ __FBSDID("$FreeBSD$");
 #include <string.h>
 
 #include <vtoc.h>
+#include <stdlib.h>
 
 #include "endian.h"
 #include "image.h"
@@ -84,7 +85,7 @@ vtoc8_write(lba_t imgsz, void *bootcode __unused)
 	be32enc(&vtoc8.map[VTOC_RAW_PART].nblks, imgsz);
 	TAILQ_FOREACH(part, &partlist, link) {
 		n = part->index + ((part->index >= VTOC_RAW_PART) ? 1 : 0);
-		be16enc(&vtoc8.part[n].tag, ALIAS_TYPE2INT(part->type));
+		be16enc(&vtoc8.part[n].tag, *((uint16_t*)part->type));
 		be32enc(&vtoc8.map[n].cyl, part->block / (nsecs * nheads));
 		be32enc(&vtoc8.map[n].nblks, part->size);
 	}
@@ -100,10 +101,42 @@ vtoc8_write(lba_t imgsz, void *bootcode __unused)
 	return (error);
 }
 
+static void *
+vtoc8_type_lookup(const char *name)
+{
+
+	uint32_t val;
+   const struct mkimg_alias *alias;
+   unsigned long *res;
+
+   alias = scheme_get_alias(name);
+
+	printf("Alias %p ",alias);
+   if (alias){
+		val = ALIAS_TYPE2INT(alias->type);
+   }else{
+		if (0 != parse_uint32(&val, 0, 0xffff, name)){
+         return NULL;
+      }
+		printf("Errno '%s'->%d\n",name,errno);
+   }
+
+	res = malloc(sizeof(*res));
+
+	if (!res){
+		return NULL;
+	}
+
+	*res = (unsigned long)val;
+	return res;
+}
+
+
 static struct mkimg_scheme vtoc8_scheme = {
 	.name = "vtoc8",
 	.description = "SMI VTOC8 disk labels",
 	.aliases = vtoc8_aliases,
+	.type_lookup = vtoc8_type_lookup,
 	.metadata = vtoc8_metadata,
 	.write = vtoc8_write,
 	.nparts = VTOC8_NPARTS - 1,

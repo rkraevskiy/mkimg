@@ -90,7 +90,7 @@ apm_write(lba_t imgsz, void *bootcode __unused)
 		be32enc(&ent->ent_pmblkcnt, nparts + 1);
 		be32enc(&ent->ent_start, part->block);
 		be32enc(&ent->ent_size, part->size);
-		strncpy(ent->ent_type, ALIAS_TYPE2PTR(part->type),
+		strncpy(ent->ent_type, part->type,
 		    sizeof(ent->ent_type));
 		if (part->label != NULL)
 			strncpy(ent->ent_name, part->label,
@@ -102,10 +102,37 @@ apm_write(lba_t imgsz, void *bootcode __unused)
 	return (error);
 }
 
+
+static void *
+apm_type_lookup(const char *name)
+{
+
+   const void *data;
+   const struct mkimg_alias *alias;
+	void *res;
+
+   alias = scheme_get_alias(name);
+
+   if (alias){
+		data = ALIAS_TYPE2PTR(alias->type);
+   }else{
+      data = name;
+   }
+
+	if (strlen(data) >= APM_ENT_TYPELEN){
+		return NULL;
+	}
+
+	res = strdup(data);
+
+	return res;
+}
+
 static struct mkimg_scheme apm_scheme = {
 	.name = "apm",
 	.description = "Apple Partition Map",
 	.aliases = apm_aliases,
+	.type_lookup = apm_type_lookup,
 	.metadata = apm_metadata,
 	.write = apm_write,
 	.nparts = 4096,

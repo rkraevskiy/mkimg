@@ -42,7 +42,7 @@ struct part {
 #define	PART_KIND_PIPE	2
 #define	PART_KIND_SIZE	3
 	u_int	index;		/* Partition index (0-based). */
-	uintptr_t type;		/* Scheme-specific partition type. */
+	void	*type;		/* Scheme-specific partition type. */
 	lba_t	block;		/* Block-offset of partition in image. */
 	lba_t	size;		/* Size in blocks of partition. */
 	char	*label;		/* Partition label. */
@@ -103,6 +103,9 @@ typedef struct mkimg_uuid mkimg_uuid_t;
 
 void mkimg_uuid(mkimg_uuid_t *);
 void mkimg_uuid_enc(void *, const mkimg_uuid_t *);
+int mkimg_uuid_parse(mkimg_uuid_t *uuid, const char *text);
+int parse_uint32(uint32_t *valp, uint32_t min, uint32_t max, const char *arg);
+
 
 #ifdef __linux__
 # if !defined(__unused)

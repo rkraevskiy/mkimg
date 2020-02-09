@@ -87,6 +87,7 @@ struct mkimg_scheme {
 	const char	*name;
 	const char	*description;
 	struct mkimg_alias *aliases;
+	void*		(*type_lookup)(const char *name);
 	lba_t		(*metadata)(u_int, lba_t);
 #define	SCHEME_META_IMG_START		1
 #define	SCHEME_META_IMG_END		2
@@ -110,10 +111,11 @@ int	scheme_select(const char *);
 struct mkimg_scheme *scheme_selected(void);
 
 int scheme_bootcode(int fd);
-int scheme_check_part(struct part *);
+int scheme_check_update_part(struct part *);
 u_int scheme_max_parts(void);
 u_int scheme_max_secsz(void);
 lba_t scheme_metadata(u_int, lba_t);
 int scheme_write(lba_t);
+const struct mkimg_alias *scheme_get_alias(const char *name);
 
 #endif /* _MKIMG_SCHEME_H_ */

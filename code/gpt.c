@@ -314,10 +314,42 @@ gpt_write(lba_t imgsz, void *bootcode)
 	return (error);
 }
 
+
+static void *
+gpt_type_lookup(const char *name)
+{
+	const struct mkimg_alias *alias;
+	mkimg_uuid_t *res;
+	mkimg_uuid_t *data;
+	mkimg_uuid_t tmp;
+
+	alias = scheme_get_alias(name);
+
+	if (alias){
+		data = ALIAS_TYPE2PTR(alias->type);
+	}else{
+		if (mkimg_uuid_parse(&tmp,name)){
+			data = &tmp;
+		}else{
+			return NULL;
+		}
+	}
+
+	res = malloc(sizeof(*res));
+
+	if (!res){
+		return NULL;
+	}
+
+	memcpy(res,data,sizeof(*res));
+	return res;
+}
+
 static struct mkimg_scheme gpt_scheme = {
 	.name = "gpt",
 	.description = "GUID Partition Table",
 	.aliases = gpt_aliases,
+	.type_lookup = gpt_type_lookup,
 	.metadata = gpt_metadata,
 	.write = gpt_write,
 	.nparts = 4096,
