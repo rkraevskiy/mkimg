@@ -51,8 +51,7 @@ static mkimg_uuid_t gpt_uuid_freebsd_vinum = GPT_ENT_TYPE_FREEBSD_VINUM;
 static mkimg_uuid_t gpt_uuid_freebsd_zfs = GPT_ENT_TYPE_FREEBSD_ZFS;
 static mkimg_uuid_t gpt_uuid_mbr = GPT_ENT_TYPE_MBR;
 static mkimg_uuid_t gpt_uuid_ms_basic_data = GPT_ENT_TYPE_MS_BASIC_DATA;
-
-
+/* Linux */
 static mkimg_uuid_t gpt_uuid_linux_data = GPT_ENT_TYPE_LINUX_DATA;
 static mkimg_uuid_t gpt_uuid_linux_raid = GPT_ENT_TYPE_LINUX_RAID;
 static mkimg_uuid_t gpt_uuid_linux_swap = GPT_ENT_TYPE_LINUX_SWAP;
@@ -66,6 +65,14 @@ static mkimg_uuid_t gpt_uuid_linux_root_ia64 = GPT_ENT_TYPE_LINUX_ROOT_IA64;
 static mkimg_uuid_t gpt_uuid_linux_reserved = GPT_ENT_TYPE_LINUX_RESERVED;
 static mkimg_uuid_t gpt_uuid_linux_home = GPT_ENT_TYPE_LINUX_HOME;
 static mkimg_uuid_t gpt_uuid_linux_extended_boot = GPT_ENT_TYPE_LINUX_EXTENDED_BOOT;
+/* NetBSD */
+static mkimg_uuid_t gpt_uuid_netbsd_ffs = GPT_ENT_TYPE_NETBSD_FFS;
+static mkimg_uuid_t gpt_uuid_netbsd_lfs = GPT_ENT_TYPE_NETBSD_LFS;
+static mkimg_uuid_t gpt_uuid_netbsd_swap = GPT_ENT_TYPE_NETBSD_SWAP;
+static mkimg_uuid_t gpt_uuid_netbsd_raid = GPT_ENT_TYPE_NETBSD_RAID;
+static mkimg_uuid_t gpt_uuid_netbsd_ccd = GPT_ENT_TYPE_NETBSD_CCD;
+static mkimg_uuid_t gpt_uuid_netbsd_cgd = GPT_ENT_TYPE_NETBSD_CGD;
+
 
 static struct mkimg_alias gpt_aliases[] = {
     {	ALIAS_EFI, ALIAS_PTR2TYPE(&gpt_uuid_efi) },
@@ -91,6 +98,12 @@ static struct mkimg_alias gpt_aliases[] = {
     { ALIAS_LINUX_SWAP, ALIAS_PTR2TYPE(&gpt_uuid_linux_swap) },
     { ALIAS_LINUX_DATA, ALIAS_PTR2TYPE(&gpt_uuid_linux_data) },
     { ALIAS_LINUX_SERVER_DATA, ALIAS_PTR2TYPE(&gpt_uuid_linux_server_data) },
+    { ALIAS_NETBSD_FFS, ALIAS_PTR2TYPE(&gpt_uuid_netbsd_ffs) },
+    { ALIAS_NETBSD_LFS, ALIAS_PTR2TYPE(&gpt_uuid_netbsd_lfs) },
+    { ALIAS_NETBSD_SWAP, ALIAS_PTR2TYPE(&gpt_uuid_netbsd_swap) },
+    { ALIAS_NETBSD_RAID, ALIAS_PTR2TYPE(&gpt_uuid_netbsd_raid) },
+    { ALIAS_NETBSD_CCD, ALIAS_PTR2TYPE(&gpt_uuid_netbsd_ccd) },
+    { ALIAS_NETBSD_CGD, ALIAS_PTR2TYPE(&gpt_uuid_netbsd_cgd) },
     {	ALIAS_NONE, 0 }		/* Keep last! */
 };
 
