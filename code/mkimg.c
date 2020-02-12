@@ -221,6 +221,174 @@ pwr_of_two(u_int nr)
 	return (((nr & (nr - 1)) == 0) ? 1 : 0);
 }
 
+static bool
+charin(char ch, const char *inlist)
+{
+	while(*inlist){
+		if (ch == *inlist){
+			return true;
+		}
+		inlist++;
+	}
+	return false;
+}
+
+
+static char *
+strnext(char *str, const char delim,char **oldp, char *oldv)
+{
+	char *res;
+
+	res = strchr(str,delim);
+	if (res){
+		if (oldp){
+			*oldp = res;
+			*oldv = *res;
+		}
+		*res = 0;
+		res++;
+	}else{
+		res = str + strlen(str);
+		if (oldp){
+			*oldp = res;
+			*oldv = *res;
+		}
+	}
+	return res;
+}
+
+static bool
+parse_number(const char *buf, uint64_t *num, size_t sector_size)
+{
+	char *end;
+	bool sector = false;
+	size_t len;
+	bool res = false;
+	char *str;
+
+
+	str = strdup(buf);
+	if (!str){
+		return false;
+	}
+	len = strlen(str);
+	end = str+len;
+
+	if (len){
+		end--;
+	}
+
+	sector = *end == 's';
+
+	if (sector){
+		*end = 0;
+	}
+
+	res = (expand_number(str, num) == 0);
+	if (sector){
+		*end = 's';
+		if (res){
+			*num *= sector_size;
+		}
+	}
+
+	free(str);
+	return res;
+}
+
+
+static bool
+parse_offset(struct part *part,char **str)
+{
+	char *ptr;
+	char *next;
+	bool abs_offset;
+	char *oldp;
+	char oldv;
+
+
+	ptr = *str;
+	next = strnext(ptr, ':', &oldp, &oldv);
+
+	if (*ptr != '+'){
+		abs_offset = true;
+	}else{
+		abs_offset = false;
+		ptr++;
+	}
+	if (!parse_number(ptr, &part->offset, secsz)){
+		*oldp = oldv;
+		return false;
+	}
+	part->abs_offset = abs_offset;
+	*str = next;
+	return true;
+}
+
+static bool
+parse_size(struct part *part,char **str)
+{
+	char *next;
+	char *ptr;
+	uint64_t bytesize;
+	char *oldp;
+	char oldv;
+
+	ptr = *str;
+
+	next = strnext(ptr,':',&oldp,&oldv);
+
+	if (!parse_number(ptr, &bytesize, secsz)){
+		*oldp = oldv;
+		return false;
+	}
+
+	part->maxsize = bytesize;
+	part->minsize = bytesize;
+
+	*str = next;
+	if (charin(*next, "-=@")){
+		return true;
+	}
+
+	parse_offset(part, str);
+	return true;
+}
+
+
+static bool
+parse_kv(struct part *part,char **str)
+{
+	char *k;
+	char *v;
+	uint64_t bytesize;
+
+	k = *str;
+	*str = strnext(k, ':', NULL, NULL);
+	v = strnext(k, '=', NULL, NULL);
+
+	if (*k == 0){
+		part->kind = PART_KIND_FILE;
+		part->contents = v;
+	}else if (!strcmp(k,"min")){
+		if (!parse_number(v, &bytesize, secsz)){
+			return false;
+		}
+		part->minsize = bytesize;
+	}else if (!strcmp(k,"max")){
+		if (!parse_number(v, &bytesize, secsz)){
+			return false;
+		}
+		part->maxsize = bytesize;
+	}else if (!strcmp(k,"offt")){
+		return parse_offset(part,&v);
+	}else if (!strcmp(k,"offset")){
+		return parse_offset(part,&v);
+	}
+	return true;
+}
+
+
 /*
  * A partition specification has the following format:
  *	<type> ':' <kind> <contents>
@@ -241,8 +409,8 @@ parse_part(const char *spec)
 {
 	struct part *part;
 	char *sep;
-	size_t len;
 	int error;
+	char *next;
 
 	if (strcmp(spec, "-") == 0) {
 		nparts++;
@@ -253,58 +421,48 @@ parse_part(const char *spec)
 	if (part == NULL)
 		return (ENOMEM);
 
-	sep = strchr(spec, ':');
-	if (sep == NULL) {
+	part->spec = next = strdup(spec);
+
+	if (!next){
 		error = EINVAL;
 		goto errout;
 	}
-	len = sep - spec + 1;
-	if (len < 2) {
-		error = EINVAL;
-		goto errout;
-	}
-	part->alias = malloc(len);
-	if (part->alias == NULL) {
-		error = ENOMEM;
-		goto errout;
-	}
-	strlcpy(part->alias, spec, len);
-	spec = sep + 1;
 
-	switch (*spec) {
-	case ':':
-		part->kind = PART_KIND_SIZE;
-		break;
-	case '=':
-		part->kind = PART_KIND_FILE;
-		break;
-	case '-':
-		part->kind = PART_KIND_PIPE;
-		break;
-	default:
-		error = EINVAL;
-		goto errout;
-	}
-	spec++;
+	next = strnext(part->spec, ':', NULL, NULL);
 
-	part->contents = strdup(spec);
-	if (part->contents == NULL) {
-		error = ENOMEM;
-		goto errout;
+	part->alias = part->spec;
+	sep = strnext(part->alias, '/', NULL, NULL);
+	if (*sep) {
+		part->label = sep;
 	}
 
-	spec = part->alias;
-	sep = strchr(spec, '/');
-	if (sep != NULL) {
-		*sep++ = '\0';
-		if (strlen(part->alias) == 0 || strlen(sep) == 0) {
-			error = EINVAL;
-			goto errout;
-		}
-		part->label = strdup(sep);
-		if (part->label == NULL) {
-			error = ENOMEM;
-			goto errout;
+	while(*next){
+		switch (*next) {
+			case ':':
+				next++;
+				break;
+			case '-':
+				part->kind = PART_KIND_PIPE;
+				next++;
+				part->contents = next;
+				next += strlen(next);
+				// TODO XXX
+				// return
+				break;
+			case '@':
+				next++;
+				if (!parse_offset(part, &next)){
+					error = EINVAL;
+					goto errout;
+				}
+				break;
+			default:
+				if (!parse_size(part, &next)){
+					if (!parse_kv(part,&next)){
+						error = EINVAL;
+						goto errout;
+					}
+				}
 		}
 	}
 
@@ -314,8 +472,7 @@ parse_part(const char *spec)
 	return (0);
 
  errout:
-	if (part->alias != NULL)
-		free(part->alias);
+	free(part->spec);
 	free(part);
 	return (error);
 }
@@ -439,9 +596,10 @@ free_partlist()
 	struct part *part;
 	struct part *tmp;
 
-
 	TAILQ_FOREACH_SAFE(part, &partlist, link, tmp) {
+		free(part->spec);
 		free(part->type);
+		free(part);
 	}
 }
 
@@ -451,9 +609,7 @@ mkimg(void)
 	FILE *fp;
 	struct part *part;
 	lba_t block, blkoffset;
-	uint64_t bytesize, byteoffset;
-	char *size, *offset;
-	bool abs_offset;
+	uint64_t bytesize;
 	int error, fd;
 
 	/* First check partition information */
@@ -466,32 +622,13 @@ mkimg(void)
 	}
 
 	block = scheme_metadata(SCHEME_META_IMG_START, 0);
-	abs_offset = false;
 	TAILQ_FOREACH(part, &partlist, link) {
-		byteoffset = blkoffset = 0;
-		abs_offset = false;
-
-		/* Look for an offset. Set size too if we can. */
-		switch (part->kind) {
-		case PART_KIND_SIZE:
-			offset = part->contents;
-			size = strsep(&offset, ":");
-			if (expand_number(size, &bytesize) == -1)
-				error = errno;
-			if (offset != NULL) {
-				if (*offset != '+')
-					abs_offset = true;
-				else
-					offset++;
-				if (expand_number(offset, &byteoffset) == -1)
-					error = errno;
-			}
-			break;
-		}
+		blkoffset = 0;
+		bytesize = 0;
 
 		/* Work out exactly where the partition starts. */
-		blkoffset = (byteoffset + secsz - 1) / secsz;
-		if (abs_offset) {
+		blkoffset = (part->offset + secsz - 1) / secsz;
+		if (part->abs_offset) {
 			part->block = scheme_metadata(SCHEME_META_PART_ABSOLUTE,
 			    blkoffset);
 		} else {
@@ -511,8 +648,9 @@ mkimg(void)
 			if (fd != -1) {
 				error = image_copyin(block, fd, &bytesize);
 				close(fd);
-			} else
+			} else{
 				error = errno;
+			}
 			break;
 		case PART_KIND_PIPE:
 			fp = popen(part->contents, "r");
@@ -520,30 +658,40 @@ mkimg(void)
 				fd = fileno(fp);
 				error = image_copyin(block, fd, &bytesize);
 				pclose(fp);
-			} else
+			} else{
 				error = errno;
+			}
 			break;
 		}
 		if (error)
 			errc(EX_IOERR, error, "partition %d", part->index + 1);
+		if (part->maxsize && bytesize > part->maxsize){
+			bytesize = part->maxsize;
+			// TODO XXX WARNING!
+		}
+
+		if (part->minsize && bytesize < part->minsize){
+			bytesize = part->minsize;
+		}
+
 		part->size = (bytesize + secsz - 1) / secsz;
 		if (verbose) {
 			bytesize = part->size * secsz;
 			fprintf(stderr, "size %llu bytes (%llu blocks)\n",
 			     (long long)bytesize, (long long)part->size);
-			if (abs_offset) {
+			if (part->abs_offset) {
 				fprintf(stderr,
 				    "    location %llu bytes (%llu blocks)\n",
-				    (long long)byteoffset,
+				    (long long)part->offset,
 				    (long long)blkoffset);
 			} else if (blkoffset > 0) {
 				fprintf(stderr,
 				    "    offset %llu bytes (%llu blocks)\n",
-				    (long long)byteoffset,
+				    (long long)part->offset,
 				    (long long)blkoffset);
 			}
 		}
-		if (!abs_offset) {
+		if (!part->abs_offset) {
 			block = scheme_metadata(SCHEME_META_PART_AFTER,
 			    part->block + part->size);
 		}
@@ -776,3 +924,4 @@ main(int argc, char *argv[])
 	free_partlist();
 	return (0);
 }
+
