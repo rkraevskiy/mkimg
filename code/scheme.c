@@ -57,6 +57,29 @@ static struct {
 	{ "mbr", ALIAS_MBR },
 	{ "ntfs", ALIAS_NTFS },
 	{ "prepboot", ALIAS_PPCBOOT },
+   /* Linux */
+	{ "linux", ALIAS_LINUX },
+	{ "linux-x86", ALIAS_LINUX_ROOT_X86 },
+	{ "linux-x86-64", ALIAS_LINUX_ROOT_X86_64 },
+	{ "linux-arm32", ALIAS_LINUX_ROOT_ARM32 },
+	{ "linux-arm64", ALIAS_LINUX_ROOT_ARM64 },
+	{ "linux-ia64", ALIAS_LINUX_ROOT_IA64 },
+	{ "linux-reserved", ALIAS_LINUX_RESERVED },
+	{ "linux-home", ALIAS_LINUX_HOME },
+	{ "linux-raid", ALIAS_LINUX_RAID },
+	{ "linux-lvm", ALIAS_LINUX_LVM },
+	{ "linux-ext-boot", ALIAS_LINUX_EXTENDED_BOOT },
+	{ "linux-swap", ALIAS_LINUX_SWAP },
+	{ "linux-data", ALIAS_LINUX_DATA },
+	{ "linux-server-data", ALIAS_LINUX_SERVER_DATA },
+	/* NetBSD */
+	{ "netbsd", ALIAS_NETBSD },
+	{ "netbsd-ffs", ALIAS_NETBSD_FFS },
+	{ "netbsd-lfs", ALIAS_NETBSD_LFS },
+	{ "netbsd-swap", ALIAS_NETBSD_SWAP },
+	{ "netbsd-raid", ALIAS_NETBSD_RAID },
+	{ "netbsd-ccd", ALIAS_NETBSD_CCD },
+	{ "netbsd-cgd", ALIAS_NETBSD_CGD },
 	{ NULL, ALIAS_NONE }		/* Keep last! */
 };
 
@@ -140,27 +163,19 @@ scheme_bootcode(int fd)
 }
 
 int
-scheme_check_part(struct part *p)
+scheme_check_update_part(struct part *p)
 {
-	struct mkimg_alias *iter;
-	enum alias alias;
+   void *type;
 
 	assert(scheme != NULL);
 
 	/* Check the partition type alias */
-	alias = scheme_parse_alias(p->alias);
-	if (alias == ALIAS_NONE)
+   type = scheme->type_lookup(p->alias);
+   if (!type){
 		return (EINVAL);
-
-	iter = scheme->aliases;
-	while (iter->alias != ALIAS_NONE) {
-		if (alias == iter->alias)
-			break;
-		iter++;
 	}
-	if (iter->alias == ALIAS_NONE)
-		return (EINVAL);
-	p->type = iter->type;
+
+	p->type = type;
 
 	/* Validate the optional label. */
 	if (p->label != NULL) {
@@ -198,3 +213,27 @@ scheme_write(lba_t end)
 
 	return ((scheme == NULL) ? 0 : scheme->write(end, bootcode));
 }
+
+const struct mkimg_alias *
+scheme_get_alias(const char *name)
+{
+	enum alias alias;
+	struct mkimg_alias *iter;
+
+	/* Check the partition type alias */
+	alias = scheme_parse_alias(name);
+	if (alias == ALIAS_NONE)
+		return (NULL);
+
+	iter = scheme->aliases;
+	while (iter->alias != ALIAS_NONE) {
+		if (alias == iter->alias)
+			break;
+		iter++;
+	}
+	if (iter->alias == ALIAS_NONE)
+		return (NULL);
+
+   return (iter);
+}
+

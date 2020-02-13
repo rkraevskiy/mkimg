@@ -105,7 +105,7 @@ bsd_write(lba_t imgsz, void *bootcode)
 		le32enc(&dp->p_size, part->size);
 		le32enc(&dp->p_offset, part->block);
 		le32enc(&dp->p_fsize, 0);
-		dp->p_fstype = ALIAS_TYPE2INT(part->type);
+		dp->p_fstype = *((unsigned char*)part->type);
 		dp->p_frag = 0;
 		le16enc(&dp->p_cpg, 0);
 	}
@@ -121,10 +121,39 @@ bsd_write(lba_t imgsz, void *bootcode)
 	return (error);
 }
 
+
+static void *
+bsd_type_lookup(const char *name)
+{
+	uint32_t val;
+	const struct mkimg_alias *alias;
+	unsigned long *res;
+
+	alias = scheme_get_alias(name);
+
+	if (alias){
+		val = ALIAS_TYPE2INT(alias->type);
+	}else{
+		if (0 != parse_uint32(&val, 0, 0xff, name)){
+			return NULL;
+		}
+	}
+
+	res = malloc(sizeof(*res));
+
+	if (!res){
+		return NULL;
+	}
+
+	*res = (unsigned long)val;
+	return res;
+}
+
 static struct mkimg_scheme bsd_scheme = {
 	.name = "bsd",
 	.description = "BSD disk label",
 	.aliases = bsd_aliases,
+	.type_lookup = bsd_type_lookup,
 	.metadata = bsd_metadata,
 	.write = bsd_write,
 	.nparts = BSD_NPARTS_MAX - 1,

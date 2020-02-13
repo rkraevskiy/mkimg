@@ -42,6 +42,7 @@ __FBSDID("$FreeBSD$");
 #include <string.h>
 #include <sysexits.h>
 #include <unistd.h>
+#include <inttypes.h>
 
 #include "image.h"
 #include "format.h"
@@ -187,7 +188,7 @@ usage(const char *why)
 	exit(EX_USAGE);
 }
 
-static int
+int
 parse_uint32(uint32_t *valp, uint32_t min, uint32_t max, const char *arg)
 {
 	uint64_t val;
@@ -433,21 +434,35 @@ mkimg_validate(void)
 }
 
 static void
+free_partlist()
+{
+	struct part *part;
+	struct part *tmp;
+
+
+	TAILQ_FOREACH_SAFE(part, &partlist, link, tmp) {
+		free(part->type);
+	}
+}
+
+static void
 mkimg(void)
 {
 	FILE *fp;
 	struct part *part;
 	lba_t block, blkoffset;
-	off_t bytesize, byteoffset;
+	uint64_t bytesize, byteoffset;
 	char *size, *offset;
 	bool abs_offset;
 	int error, fd;
 
 	/* First check partition information */
 	TAILQ_FOREACH(part, &partlist, link) {
-		error = scheme_check_part(part);
-		if (error)
+		error = scheme_check_update_part(part);
+		if (error){
+			free_partlist();
 			errc(EX_DATAERR, error, "partition %d", part->index+1);
+		}
 	}
 
 	block = scheme_metadata(SCHEME_META_IMG_START, 0);
@@ -553,6 +568,34 @@ mkimg(void)
 	if (error)
 		errc(EX_IOERR, error, "writing metadata");
 }
+
+int
+mkimg_uuid_parse(mkimg_uuid_t *uuid, const char *text)
+{
+	int n;
+
+	if (strlen(text) == 36){
+		n = sscanf(text,
+				"%08"SCNx32"-%04"SCNx16"-%04"SCNx16"-%02"SCNx8"%02"SCNx8"-%02"SCNx8"%02"SCNx8"%02"SCNx8"%02"SCNx8"%02"SCNx8"%02"SCNx8"",
+				&uuid->time_low,
+				&uuid->time_mid,
+				&uuid->time_hi_and_version,
+				&uuid->clock_seq_hi_and_reserved,
+				&uuid->clock_seq_low,
+				&uuid->node[0],
+				&uuid->node[1],
+				&uuid->node[2],
+				&uuid->node[3],
+				&uuid->node[4],
+				&uuid->node[5]);
+
+		if (n == 11){
+			return 1;
+		}
+	}
+	return 0;
+}
+
 
 int
 main(int argc, char *argv[])
@@ -730,5 +773,6 @@ main(int argc, char *argv[])
 	if (error)
 		errc(EX_IOERR, error, "writing image");
 
+	free_partlist();
 	return (0);
 }

@@ -56,8 +56,10 @@
 #define	DOSPTYP_LINLVM	0x8e	/* Linux LVM partition */
 #define	DOSPTYP_386BSD	0xa5	/* 386BSD partition type */
 #define	DOSPTYP_APPLE_UFS	0xa8	/* Apple Mac OS X boot */
+#define	DOSPTYP_NETBSD	0xa9	/* NetBSD slice partition type */
 #define	DOSPTYP_APPLE_BOOT	0xab	/* Apple Mac OS X UFS */
 #define	DOSPTYP_HFS	0xaf	/* HFS/HFS+ partition type */
+#define	DOSPTYP_LINUX_EXT_BOOT	0xea	/* Linux extended boot */
 #define	DOSPTYP_PMBR	0xee	/* GPT Protective MBR */
 #define	DOSPTYP_EFI	0xef	/* EFI FAT parition */
 #define	DOSPTYP_VMFS	0xfb	/* VMware VMFS partition */

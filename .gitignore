@@ -1,3 +1,5 @@
 .build
 mkimg
+tags
+*.o
 
