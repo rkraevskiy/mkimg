@@ -55,9 +55,9 @@ __FBSDID("$FreeBSD$");
 #define	LONGOPT_CAPACITY	0x01000004
 
 #define BYTES_TO_SECTORS(x) (((x) + secsz - 1) / secsz)
-
 #define SECTORS_TO_BYTES(x) ((x) * secsz)
 
+#define TOULL(x) ((unsigned long long)(x))
 
 static struct option longopts[] = {
 	{ "formats", no_argument, NULL, LONGOPT_FORMATS },
@@ -617,24 +617,42 @@ static void
 mkimg_validate(void)
 {
 	struct part *part, *part2;
-	lba_t start, end, start2, end2;
+	lba_t start, end, start2, end2, min_start, max_end;
 	uint64_t bytes;
 	int i, j;
 	int errors = 0;
 
+
+	if (verbose > 1){
+		fprintf(stderr, "\n======[ Partitions info ]========================================================================\n");
+		fprintf(stderr, " #  |           Start |             End |            Size |  Type                                \n");
+		fprintf(stderr, "----+-----------------+-----------------+-----------------+--------------------------------------\n");
+		TAILQ_FOREACH(part, &partlist, link) {
+			start = part->block;
+			end = part->block + part->size;
+			fprintf(stderr, "%3d | %15ld | %15ld | %15ld | %s\n",part->index+1,start,end-1,part->size,part->alias);
+		}
+		fprintf(stderr, "=================================================================================================\n");
+	}
+
 	i = 0;
+	min_start = MAXLBA;
+	max_end = 0;
 
 	TAILQ_FOREACH(part, &partlist, link) {
 		start = part->block;
 		end = part->block + part->size;
 
+		max_end = MAX(end,max_end);
+		min_start = MIN(start,min_start);
+
 		if (part->maxsize.valid){
 			bytes = SECTORS_TO_BYTES(part->size);
 			if (bytes > part->maxsize.val){
-				fprintf(stderr, "partition %d: size is to big. "
-						"size:%llu, maximum size:%llu\n",
-						part->index + 1, (long long)bytes,
-						(long long)part->maxsize.val
+				fprintf(stderr, "!error: partition %d: size is to big. "
+						"size:%llu, specified maximum size:%llu\n",
+						part->index + 1, TOULL(bytes),
+						TOULL(part->maxsize.val)
 						);
 				errors++;
 			}
@@ -649,10 +667,15 @@ mkimg_validate(void)
 			start2 = part2->block;
 			end2 = part2->block + part2->size;
 
-			if ((start >= start2 && start < end2) ||
-					(end > start2 && end <= end2)) {
-				fprintf(stderr, "partition %d overlaps partition %d",
-						i, j);
+			max_end = MAX(end2,max_end);
+			min_start = MIN(start2,min_start);
+
+			if ( (start >= start2 && start < end2) ||
+					(end > start2 && end < end2) ||
+					(start2 >= start && start2 < end) ||
+					(end2 > start && end2 < end)){
+				fprintf(stderr, "!error: partition %d overlaps partition %d: [%ld-%ld] vs [%ld-%ld]\n",
+						i+1, j+1, start, end-1, start2, end2-1);
 				errors++;
 
 			}
@@ -663,11 +686,17 @@ mkimg_validate(void)
 		i++;
 	}
 
-	if (errors){
-		errx(1, "The errors were found");
+	if (max_capacity){
+		if ( SECTORS_TO_BYTES(max_end - min_start) > max_capacity){
+			errors++;
+			fprintf(stderr, "!error: total disk size is bigger than specified disk capacity: %llu > %llu\n",
+					TOULL(SECTORS_TO_BYTES(max_end - min_start)), TOULL(max_capacity));
 
+		}
 	}
-
+	if (errors){
+		errx(1, "errors were found");
+	}
 }
 
 static void
@@ -683,14 +712,16 @@ free_partlist()
 	}
 }
 
-static void
-update_percents(struct pvalue *pval, uint64_t val)
+static bool
+update_percents(struct pvalue *pval, uint64_t val, bool fail)
 {
 	if (pval->valid){
 		if (pval->pcent){
-			pval->val = (uint64_t)(val*pval->pcent);
+			pval->val = ((uint64_t)(val*pval->pcent))/100;
+			return !((val == 0) && fail);
 		}
 	}
+	return true;
 }
 
 
@@ -701,21 +732,56 @@ mkimg(void)
 	struct part *part;
 	lba_t block, blkoffset;
 	uint64_t bytesize;
-	int error, fd;
+	int error, fd, errors;
 
-	/* First check partition information */
+
+	errors = 0;
+	/* First check and update partition information */
 	TAILQ_FOREACH(part, &partlist, link) {
 		error = scheme_check_update_part(part);
-		if (!error){
-			update_percents(&part->minsize,min_capacity);
-			update_percents(&part->maxsize,max_capacity);
-			update_percents(&part->offset,max_capacity);
-		}
 		if (error){
-			free_partlist();
-			errc(EX_DATAERR, error, "partition %d", part->index+1);
+			errors++;
+			fprintf(stderr,"partition %d error:%s", part->index+1,strerror(error));
+		}
+		if (!update_percents(&part->minsize,max_capacity,true)){
+			fprintf(stderr,"partition %d error: cannot calculate minimum partition size as %3.2f%% of disk capacity, disk capacity is not specified\n",part->index+1,part->maxsize.pcent);
+			errors++;
+		}
+		if (!update_percents(&part->maxsize,max_capacity,true)){
+			fprintf(stderr,"partition %d error: cannot calculate maximum partition size as %3.2f%% of disk capacity, disk capacity is not specified\n",part->index+1,part->maxsize.pcent);
+			errors++;
+		}
+		if (!update_percents(&part->offset,max_capacity,true)){
+			fprintf(stderr,"partition %d error: cannot calculate offset as %3.2f%% of disk capacity, disk capacity is not specified\n",part->index+1,part->offset.pcent);
+			errors++;
+		}
+
+		if (part->maxsize.valid && part->minsize.valid){
+			if (part->maxsize.val < part->minsize.val){
+				fprintf(stderr,"partition %d error: partition minimum size is greater then maximum size\n",part->index+1);
+				errors++;
+			}
 		}
 	}
+
+	if (errors){
+		free_partlist();
+		errx(EX_DATAERR, "errors were found");
+	}
+
+#ifdef DEBUG
+	if (verbose > 1){
+		fprintf(stderr, "======[ Partitions info ]========================================================================\n");
+		fprintf(stderr, " #  | type                                 | maxsize         | minsize         | offt            \n");
+		fprintf(stderr, "----+--------------------------------------+-----------------+-----------------+-----------------\n");
+		TAILQ_FOREACH(part, &partlist, link) {
+			fprintf(stderr, "%3d | %-36s | %15llu | %15llu | %15llu\n", part->index+1,
+					part->alias, TOULL(part->minsize.val), TOULL(part->maxsize.val),
+					TOULL(part->offset.val));
+		}
+		fprintf(stderr, "=================================================================================================\n");
+	}
+#endif
 
 	block = scheme_metadata(SCHEME_META_IMG_START, 0);
 	TAILQ_FOREACH(part, &partlist, link) {
@@ -988,6 +1054,13 @@ main(int argc, char *argv[])
 		fprintf(stderr, "Logical sector size: %u\n", secsz);
 		fprintf(stderr, "Physical block size: %u\n", blksz);
 		fprintf(stderr, "Sectors per track:   %u\n", nsecs);
+		fprintf(stderr, "Number of heads:     %u\n", nheads);
+		if (max_capacity) {
+			fprintf(stderr, "Max disk capacity:   %llu\n", TOULL(max_capacity));
+		}
+		if (min_capacity) {
+			fprintf(stderr, "Min disk capacity:   %llu\n", TOULL(min_capacity));
+		}
 		fprintf(stderr, "Number of heads:     %u\n", nheads);
 		fputc('\n', stderr);
 		if (scheme_selected())
