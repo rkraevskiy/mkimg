@@ -33,6 +33,13 @@
 #include <sys/types.h>
 #include <stdbool.h>
 
+
+struct pvalue{
+	double   pcent;
+	uint64_t val;
+	bool valid;
+};
+
 struct part {
 	TAILQ_ENTRY(part) link;
 	char	*spec;		/* Partition specification. */
@@ -45,10 +52,10 @@ struct part {
 	u_int	index;		/* Partition index (0-based). */
 	void	*type;		/* Scheme-specific partition type. */
 	lba_t	block;		/* Block-offset of partition in image. */
-	lba_t	size;		/* Size in blocks of partition. */
-	uint64_t minsize;	/* Minimum byte size of partition. */
-	uint64_t maxsize;	/* Maximum byte size of partition. */
-	uint64_t offset;	/* Byte offset */
+	lba_t	size;			/* Size in blocks of partition. */
+	struct pvalue minsize;	/* Minimum byte size of partition. */
+	struct pvalue maxsize;	/* Maximum byte size of partition. */
+	struct pvalue offset;	/* bytes offset of partition */
 	bool abs_offset;	/* absolute offset */
 	char	*label;		/* Partition label. */
 };

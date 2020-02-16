@@ -54,6 +54,11 @@ __FBSDID("$FreeBSD$");
 #define	LONGOPT_VERSION		0x01000003
 #define	LONGOPT_CAPACITY	0x01000004
 
+#define BYTES_TO_SECTORS(x) (((x) + secsz - 1) / secsz)
+
+#define SECTORS_TO_BYTES(x) ((x) * secsz)
+
+
 static struct option longopts[] = {
 	{ "formats", no_argument, NULL, LONGOPT_FORMATS },
 	{ "schemes", no_argument, NULL, LONGOPT_SCHEMES },
@@ -258,13 +263,40 @@ strnext(char *str, const char delim,char **oldp, char *oldv)
 }
 
 static bool
+parse_percent(const char *buf, double *num)
+{
+	char *endptr;
+	double v;
+
+	errno = 0;
+
+	v = strtod(buf, &endptr);
+
+	if (errno != 0 || buf == endptr){
+		return false;
+	}
+
+	if (v < 0){
+		return false;
+	}
+
+
+	if (*endptr == '%'){
+		*num = v;
+		return true;
+	}
+	return false;
+}
+
+static bool
 parse_number(const char *buf, uint64_t *num, size_t sector_size)
 {
 	char *end;
 	bool sector = false;
 	size_t len;
-	bool res = false;
+	bool parsed = false;
 	char *str;
+	uint64_t v;
 
 
 	str = strdup(buf);
@@ -284,18 +316,40 @@ parse_number(const char *buf, uint64_t *num, size_t sector_size)
 		*end = 0;
 	}
 
-	res = (expand_number(str, num) == 0);
+	parsed = (expand_number(str, &v) == 0);
+
+	if (parsed){
+		*num = v;
+	}
+
 	if (sector){
 		*end = 's';
-		if (res){
+		if (parsed){
 			*num *= sector_size;
 		}
 	}
 
 	free(str);
-	return res;
+	return parsed;
 }
 
+
+static bool
+parse_pvalue(char *str, struct pvalue *pval)
+{
+	bool valid;
+
+	valid = parse_percent(str, &pval->pcent);
+	if (!valid){
+		valid = parse_number(str, &pval->val, secsz);
+	}
+
+	if (valid){
+		pval->valid = true;
+	}
+
+	return valid;
+}
 
 static bool
 parse_offset(struct part *part,char **str)
@@ -307,6 +361,9 @@ parse_offset(struct part *part,char **str)
 	char oldv;
 
 
+	if (part->offset.valid){
+		return false;
+	}
 	ptr = *str;
 	next = strnext(ptr, ':', &oldp, &oldv);
 
@@ -316,7 +373,11 @@ parse_offset(struct part *part,char **str)
 		abs_offset = false;
 		ptr++;
 	}
-	if (!parse_number(ptr, &part->offset, secsz)){
+
+	part->offset.val = 0;
+	part->offset.pcent = 0;
+
+	if (!parse_pvalue(ptr,&part->offset)){
 		*oldp = oldv;
 		return false;
 	}
@@ -330,21 +391,22 @@ parse_size(struct part *part,char **str)
 {
 	char *next;
 	char *ptr;
-	uint64_t bytesize;
 	char *oldp;
 	char oldv;
 
 	ptr = *str;
 
+	if (part->maxsize.valid || part->minsize.valid){
+		return false;
+	}
 	next = strnext(ptr,':',&oldp,&oldv);
 
-	if (!parse_number(ptr, &bytesize, secsz)){
+	if (!parse_pvalue(ptr,&part->maxsize)){
 		*oldp = oldv;
 		return false;
 	}
 
-	part->maxsize = bytesize;
-	part->minsize = bytesize;
+	part->minsize = part->maxsize;
 
 	*str = next;
 	if (charin(*next, "-=@")){
@@ -355,13 +417,11 @@ parse_size(struct part *part,char **str)
 	return true;
 }
 
-
 static bool
 parse_kv(struct part *part,char **str)
 {
 	char *k;
 	char *v;
-	uint64_t bytesize;
 
 	k = *str;
 	*str = strnext(k, ':', NULL, NULL);
@@ -371,19 +431,18 @@ parse_kv(struct part *part,char **str)
 		part->kind = PART_KIND_FILE;
 		part->contents = v;
 	}else if (!strcmp(k,"min")){
-		if (!parse_number(v, &bytesize, secsz)){
-			return false;
-		}
-		part->minsize = bytesize;
+		return parse_pvalue(v, &part->minsize);
 	}else if (!strcmp(k,"max")){
-		if (!parse_number(v, &bytesize, secsz)){
-			return false;
-		}
-		part->maxsize = bytesize;
+		return parse_pvalue(v, &part->maxsize);
 	}else if (!strcmp(k,"offt")){
 		return parse_offset(part,&v);
 	}else if (!strcmp(k,"offset")){
 		return parse_offset(part,&v);
+	}else if (!strcmp(k,"size")){
+		if (!parse_pvalue(v, &part->maxsize)){
+			return false;
+		}
+		part->minsize = part->maxsize;
 	}
 	return true;
 }
@@ -446,8 +505,6 @@ parse_part(const char *spec)
 				next++;
 				part->contents = next;
 				next += strlen(next);
-				// TODO XXX
-				// return
 				break;
 			case '@':
 				next++;
@@ -545,8 +602,8 @@ capacity_resize(lba_t end)
 {
 	lba_t min_capsz, max_capsz;
 
-	min_capsz = (min_capacity + secsz - 1) / secsz;
-	max_capsz = (max_capacity + secsz - 1) / secsz;
+	min_capsz = BYTES_TO_SECTORS(min_capacity);
+	max_capsz = BYTES_TO_SECTORS(max_capacity);
 
 	if (max_capsz != 0 && end > max_capsz)
 		return (ENOSPC);
@@ -561,13 +618,28 @@ mkimg_validate(void)
 {
 	struct part *part, *part2;
 	lba_t start, end, start2, end2;
+	uint64_t bytes;
 	int i, j;
+	int errors = 0;
 
 	i = 0;
 
 	TAILQ_FOREACH(part, &partlist, link) {
 		start = part->block;
 		end = part->block + part->size;
+
+		if (part->maxsize.valid){
+			bytes = SECTORS_TO_BYTES(part->size);
+			if (bytes > part->maxsize.val){
+				fprintf(stderr, "partition %d: size is to big. "
+						"size:%llu, maximum size:%llu\n",
+						part->index + 1, (long long)bytes,
+						(long long)part->maxsize.val
+						);
+				errors++;
+			}
+		}
+
 		j = i + 1;
 		part2 = TAILQ_NEXT(part, link);
 		if (part2 == NULL)
@@ -578,9 +650,11 @@ mkimg_validate(void)
 			end2 = part2->block + part2->size;
 
 			if ((start >= start2 && start < end2) ||
-			    (end > start2 && end <= end2)) {
-				errx(1, "partition %d overlaps partition %d",
-				    i, j);
+					(end > start2 && end <= end2)) {
+				fprintf(stderr, "partition %d overlaps partition %d",
+						i, j);
+				errors++;
+
 			}
 
 			j++;
@@ -588,6 +662,12 @@ mkimg_validate(void)
 
 		i++;
 	}
+
+	if (errors){
+		errx(1, "The errors were found");
+
+	}
+
 }
 
 static void
@@ -604,6 +684,17 @@ free_partlist()
 }
 
 static void
+update_percents(struct pvalue *pval, uint64_t val)
+{
+	if (pval->valid){
+		if (pval->pcent){
+			pval->val = (uint64_t)(val*pval->pcent);
+		}
+	}
+}
+
+
+static void
 mkimg(void)
 {
 	FILE *fp;
@@ -615,6 +706,11 @@ mkimg(void)
 	/* First check partition information */
 	TAILQ_FOREACH(part, &partlist, link) {
 		error = scheme_check_update_part(part);
+		if (!error){
+			update_percents(&part->minsize,min_capacity);
+			update_percents(&part->maxsize,max_capacity);
+			update_percents(&part->offset,max_capacity);
+		}
 		if (error){
 			free_partlist();
 			errc(EX_DATAERR, error, "partition %d", part->index+1);
@@ -627,7 +723,7 @@ mkimg(void)
 		bytesize = 0;
 
 		/* Work out exactly where the partition starts. */
-		blkoffset = (part->offset + secsz - 1) / secsz;
+		blkoffset = BYTES_TO_SECTORS(part->offset.val);
 		if (part->abs_offset) {
 			part->block = scheme_metadata(SCHEME_META_PART_ABSOLUTE,
 			    blkoffset);
@@ -665,16 +761,12 @@ mkimg(void)
 		}
 		if (error)
 			errc(EX_IOERR, error, "partition %d", part->index + 1);
-		if (part->maxsize && bytesize > part->maxsize){
-			bytesize = part->maxsize;
-			// TODO XXX WARNING!
+
+		if (part->minsize.valid && bytesize < part->minsize.val){
+			bytesize = part->minsize.val;
 		}
 
-		if (part->minsize && bytesize < part->minsize){
-			bytesize = part->minsize;
-		}
-
-		part->size = (bytesize + secsz - 1) / secsz;
+		part->size = BYTES_TO_SECTORS(bytesize);
 		if (verbose) {
 			bytesize = part->size * secsz;
 			fprintf(stderr, "size %llu bytes (%llu blocks)\n",
@@ -682,12 +774,12 @@ mkimg(void)
 			if (part->abs_offset) {
 				fprintf(stderr,
 				    "    location %llu bytes (%llu blocks)\n",
-				    (long long)part->offset,
+				    (long long)part->offset.val,
 				    (long long)blkoffset);
 			} else if (blkoffset > 0) {
 				fprintf(stderr,
 				    "    offset %llu bytes (%llu blocks)\n",
-				    (long long)part->offset,
+				    (long long)part->offset.val,
 				    (long long)blkoffset);
 			}
 		}
