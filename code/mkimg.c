@@ -53,11 +53,18 @@ __FBSDID("$FreeBSD$");
 #define	LONGOPT_SCHEMES		0x01000002
 #define	LONGOPT_VERSION		0x01000003
 #define	LONGOPT_CAPACITY	0x01000004
+#define	LONGOPT_TYPES		0x01000005
+
+#define BYTES_TO_SECTORS(x) (((x) + secsz - 1) / secsz)
+#define SECTORS_TO_BYTES(x) ((x) * secsz)
+
+#define TOULL(x) ((unsigned long long)(x))
 
 static struct option longopts[] = {
 	{ "formats", no_argument, NULL, LONGOPT_FORMATS },
 	{ "schemes", no_argument, NULL, LONGOPT_SCHEMES },
 	{ "version", no_argument, NULL, LONGOPT_VERSION },
+	{ "types", optional_argument, NULL, LONGOPT_TYPES },
 	{ "capacity", required_argument, NULL, LONGOPT_CAPACITY },
 	{ NULL, 0, NULL, 0 }
 };
@@ -126,6 +133,13 @@ print_schemes(int usage)
 	}
 }
 
+
+static void
+print_types(const char *name)
+{
+	scheme_show_info(name);
+}
+
 static void
 print_version(void)
 {
@@ -148,11 +162,13 @@ usage(const char *why)
 	fprintf(stderr, "usage: %s <options>\n", getprogname());
 
 	fprintf(stderr, "    options:\n");
-	fprintf(stderr, "\t--formats\t-  list image formats\n");
-	fprintf(stderr, "\t--schemes\t-  list partition schemes\n");
-	fprintf(stderr, "\t--version\t-  show version information\n");
+	fprintf(stderr, "\t--formats         \t-  list image formats\n");
+	fprintf(stderr, "\t--schemes         \t-  list partition schemes\n");
+	fprintf(stderr, "\t--version         \t-  show version information\n");
+	fprintf(stderr, "\t--capacity=<num>  \t-  capacity (in bytes) of the disk\n");
+	fprintf(stderr, "\t--types[=<scheme>]\t-  show partition types information [for <scheme>]\n");
 	fputc('\n', stderr);
-	fprintf(stderr, "\t-a <num>\t-  mark num'th partion as active\n");
+	fprintf(stderr, "\t-a <num>\t-  mark num'th partition as active\n");
 	fprintf(stderr, "\t-b <file>\t-  file containing boot code\n");
 	fprintf(stderr, "\t-c <num>\t-  minimum capacity (in bytes) of the disk\n");
 	fprintf(stderr, "\t-C <num>\t-  maximum capacity (in bytes) of the disk\n");
@@ -175,6 +191,18 @@ usage(const char *why)
 	fprintf(stderr, "\t<t>[/<l>]::<size>[:[+]<offset>]\t-  "
 	    "empty partition of given size and\n\t\t\t\t\t"
 	    "   optional relative or absolute offset\n");
+	fprintf(stderr, "\t<t>[/<l>][:max=<maxsize>]\\\n"
+		 "\t\t[:offt=<[+]offt>]\\\n"
+		 "\t\t[:min=<minsize>]\\\n"
+		 "\t\t:=<file>\t\t-  partition content determined by the\n"
+		 "\t\t\t\t\t   named file partition and optionaly limited in\n"
+		 "\t\t\t\t\t   size - not less then <minsize> and no greater\n"
+		 "\t\t\t\t\t   then <maxsize>. An optional <offset> parameter\n"
+ 		 "\t\t\t\t\t   shift start of the partition by <offset> bytes\n"
+ 		 "\t\t\t\t\t   using absolute or relative offset.\n"
+ 		 "\t\t\t\t\t   An absolute offset is in <offset> from and\n"
+ 		 "\t\t\t\t\t   relative offset is in <+offset> form.\n"
+		 );
 	fprintf(stderr, "\t<t>[/<l>]:=<file>\t\t-  partition content and size "
 	    "are\n\t\t\t\t\t   determined by the named file\n");
 	fprintf(stderr, "\t<t>[/<l>]:-<cmd>\t\t-  partition content and size "
@@ -221,6 +249,228 @@ pwr_of_two(u_int nr)
 	return (((nr & (nr - 1)) == 0) ? 1 : 0);
 }
 
+static bool
+charin(char ch, const char *inlist)
+{
+	while(*inlist){
+		if (ch == *inlist){
+			return true;
+		}
+		inlist++;
+	}
+	return false;
+}
+
+
+static char *
+strnext(char *str, const char delim,char **oldp, char *oldv)
+{
+	char *res;
+
+	res = strchr(str,delim);
+	if (res){
+		if (oldp){
+			*oldp = res;
+			*oldv = *res;
+		}
+		*res = 0;
+		res++;
+	}else{
+		res = str + strlen(str);
+		if (oldp){
+			*oldp = res;
+			*oldv = *res;
+		}
+	}
+	return res;
+}
+
+static bool
+parse_percent(const char *buf, double *num)
+{
+	char *endptr;
+	double v;
+
+	errno = 0;
+
+	v = strtod(buf, &endptr);
+
+	if (errno != 0 || buf == endptr){
+		return false;
+	}
+
+	if (v < 0){
+		return false;
+	}
+
+
+	if (*endptr == '%'){
+		*num = v;
+		return true;
+	}
+	return false;
+}
+
+static bool
+parse_number(const char *buf, uint64_t *num, size_t sector_size)
+{
+	char *end;
+	bool sector = false;
+	size_t len;
+	bool parsed = false;
+	char *str;
+	uint64_t v;
+
+
+	str = strdup(buf);
+	if (!str){
+		return false;
+	}
+	len = strlen(str);
+	end = str+len;
+
+	if (len){
+		end--;
+	}
+
+	sector = *end == 's';
+
+	if (sector){
+		*end = 0;
+	}
+
+	parsed = (expand_number(str, &v) == 0);
+
+	if (parsed){
+		*num = v;
+	}
+
+	if (sector){
+		*end = 's';
+		if (parsed){
+			*num *= sector_size;
+		}
+	}
+
+	free(str);
+	return parsed;
+}
+
+
+static bool
+parse_pvalue(char *str, struct pvalue *pval)
+{
+	bool valid;
+
+	valid = parse_percent(str, &pval->pcent);
+	if (!valid){
+		valid = parse_number(str, &pval->val, secsz);
+	}
+
+	if (valid){
+		pval->valid = true;
+	}
+
+	return valid;
+}
+
+static bool
+parse_offset(struct part *part,char **str)
+{
+	char *ptr;
+	char *next;
+	bool abs_offset;
+	char *oldp;
+	char oldv;
+
+
+	if (part->offset.valid){
+		return false;
+	}
+	ptr = *str;
+	next = strnext(ptr, ':', &oldp, &oldv);
+
+	if (*ptr != '+'){
+		abs_offset = true;
+	}else{
+		abs_offset = false;
+		ptr++;
+	}
+
+	part->offset.val = 0;
+	part->offset.pcent = 0;
+
+	if (!parse_pvalue(ptr,&part->offset)){
+		*oldp = oldv;
+		return false;
+	}
+	part->abs_offset = abs_offset;
+	*str = next;
+	return true;
+}
+
+static bool
+parse_size(struct part *part,char **str)
+{
+	char *next;
+	char *ptr;
+	char *oldp;
+	char oldv;
+
+	ptr = *str;
+
+	if (part->maxsize.valid || part->minsize.valid){
+		return false;
+	}
+	next = strnext(ptr,':',&oldp,&oldv);
+
+	if (!parse_pvalue(ptr,&part->maxsize)){
+		*oldp = oldv;
+		return false;
+	}
+
+	part->minsize = part->maxsize;
+
+	*str = next;
+	if (charin(*next, "-=@")){
+		return true;
+	}
+
+	parse_offset(part, str);
+	return true;
+}
+
+static bool
+parse_kv(struct part *part,char **str)
+{
+	char *k;
+	char *v;
+
+	k = *str;
+	*str = strnext(k, ':', NULL, NULL);
+	v = strnext(k, '=', NULL, NULL);
+
+	if (*k == 0){
+		part->kind = PART_KIND_FILE;
+		part->contents = v;
+	}else if (!strcmp(k,"min")){
+		return parse_pvalue(v, &part->minsize);
+	}else if (!strcmp(k,"max")){
+		return parse_pvalue(v, &part->maxsize);
+	}else if (!strcmp(k,"offt")){
+		return parse_offset(part,&v);
+	}else if (!strcmp(k,"offset")){
+		return parse_offset(part,&v);
+	}else if (!strcmp(k,"size")){
+		if (!parse_pvalue(v, &part->maxsize)){
+			return false;
+		}
+		part->minsize = part->maxsize;
+	}
+	return true;
+}
+
+
 /*
  * A partition specification has the following format:
  *	<type> ':' <kind> <contents>
@@ -241,8 +491,8 @@ parse_part(const char *spec)
 {
 	struct part *part;
 	char *sep;
-	size_t len;
 	int error;
+	char *next;
 
 	if (strcmp(spec, "-") == 0) {
 		nparts++;
@@ -253,58 +503,46 @@ parse_part(const char *spec)
 	if (part == NULL)
 		return (ENOMEM);
 
-	sep = strchr(spec, ':');
-	if (sep == NULL) {
+	part->spec = next = strdup(spec);
+
+	if (!next){
 		error = EINVAL;
 		goto errout;
 	}
-	len = sep - spec + 1;
-	if (len < 2) {
-		error = EINVAL;
-		goto errout;
-	}
-	part->alias = malloc(len);
-	if (part->alias == NULL) {
-		error = ENOMEM;
-		goto errout;
-	}
-	strlcpy(part->alias, spec, len);
-	spec = sep + 1;
 
-	switch (*spec) {
-	case ':':
-		part->kind = PART_KIND_SIZE;
-		break;
-	case '=':
-		part->kind = PART_KIND_FILE;
-		break;
-	case '-':
-		part->kind = PART_KIND_PIPE;
-		break;
-	default:
-		error = EINVAL;
-		goto errout;
-	}
-	spec++;
+	next = strnext(part->spec, ':', NULL, NULL);
 
-	part->contents = strdup(spec);
-	if (part->contents == NULL) {
-		error = ENOMEM;
-		goto errout;
+	part->alias = part->spec;
+	sep = strnext(part->alias, '/', NULL, NULL);
+	if (*sep) {
+		part->label = sep;
 	}
 
-	spec = part->alias;
-	sep = strchr(spec, '/');
-	if (sep != NULL) {
-		*sep++ = '\0';
-		if (strlen(part->alias) == 0 || strlen(sep) == 0) {
-			error = EINVAL;
-			goto errout;
-		}
-		part->label = strdup(sep);
-		if (part->label == NULL) {
-			error = ENOMEM;
-			goto errout;
+	while(*next){
+		switch (*next) {
+			case ':':
+				next++;
+				break;
+			case '-':
+				part->kind = PART_KIND_PIPE;
+				next++;
+				part->contents = next;
+				next += strlen(next);
+				break;
+			case '@':
+				next++;
+				if (!parse_offset(part, &next)){
+					error = EINVAL;
+					goto errout;
+				}
+				break;
+			default:
+				if (!parse_size(part, &next)){
+					if (!parse_kv(part,&next)){
+						error = EINVAL;
+						goto errout;
+					}
+				}
 		}
 	}
 
@@ -314,8 +552,7 @@ parse_part(const char *spec)
 	return (0);
 
  errout:
-	if (part->alias != NULL)
-		free(part->alias);
+	free(part->spec);
 	free(part);
 	return (error);
 }
@@ -388,8 +625,8 @@ capacity_resize(lba_t end)
 {
 	lba_t min_capsz, max_capsz;
 
-	min_capsz = (min_capacity + secsz - 1) / secsz;
-	max_capsz = (max_capacity + secsz - 1) / secsz;
+	min_capsz = BYTES_TO_SECTORS(min_capacity);
+	max_capsz = BYTES_TO_SECTORS(max_capacity);
 
 	if (max_capsz != 0 && end > max_capsz)
 		return (ENOSPC);
@@ -403,14 +640,47 @@ static void
 mkimg_validate(void)
 {
 	struct part *part, *part2;
-	lba_t start, end, start2, end2;
+	lba_t start, end, start2, end2, min_start, max_end;
+	uint64_t bytes;
 	int i, j;
+	int errors = 0;
+
+
+	if (verbose > 1){
+		fprintf(stderr, "\n======[ Partitions info ]========================================================================\n");
+		fprintf(stderr, " #  |           Start |             End |            Size |  Type                                \n");
+		fprintf(stderr, "----+-----------------+-----------------+-----------------+--------------------------------------\n");
+		TAILQ_FOREACH(part, &partlist, link) {
+			start = part->block;
+			end = part->block + part->size;
+			fprintf(stderr, "%3d | %15ld | %15ld | %15ld | %s\n",part->index+1,start,end-1,part->size,part->alias);
+		}
+		fprintf(stderr, "=================================================================================================\n");
+	}
 
 	i = 0;
+	min_start = MAXLBA;
+	max_end = 0;
 
 	TAILQ_FOREACH(part, &partlist, link) {
 		start = part->block;
 		end = part->block + part->size;
+
+		max_end = MAX(end,max_end);
+		min_start = MIN(start,min_start);
+
+		if (part->maxsize.valid){
+			bytes = SECTORS_TO_BYTES(part->size);
+			if (bytes > part->maxsize.val){
+				fprintf(stderr, "!error: partition %d: size is to big. "
+						"size:%llu, specified maximum size:%llu\n",
+						part->index + 1, TOULL(bytes),
+						TOULL(part->maxsize.val)
+						);
+				errors++;
+			}
+		}
+
 		j = i + 1;
 		part2 = TAILQ_NEXT(part, link);
 		if (part2 == NULL)
@@ -420,16 +690,35 @@ mkimg_validate(void)
 			start2 = part2->block;
 			end2 = part2->block + part2->size;
 
-			if ((start >= start2 && start < end2) ||
-			    (end > start2 && end <= end2)) {
-				errx(1, "partition %d overlaps partition %d",
-				    i, j);
+			max_end = MAX(end2,max_end);
+			min_start = MIN(start2,min_start);
+
+			if ( (start >= start2 && start < end2) ||
+					(end > start2 && end < end2) ||
+					(start2 >= start && start2 < end) ||
+					(end2 > start && end2 < end)){
+				fprintf(stderr, "!error: partition %d overlaps partition %d: [%ld-%ld] vs [%ld-%ld]\n",
+						i+1, j+1, start, end-1, start2, end2-1);
+				errors++;
+
 			}
 
 			j++;
 		}
 
 		i++;
+	}
+
+	if (max_capacity){
+		if ( SECTORS_TO_BYTES(max_end - min_start) > max_capacity){
+			errors++;
+			fprintf(stderr, "!error: total disk size is bigger than specified disk capacity: %llu > %llu\n",
+					TOULL(SECTORS_TO_BYTES(max_end - min_start)), TOULL(max_capacity));
+
+		}
+	}
+	if (errors){
+		errx(1, "errors were found");
 	}
 }
 
@@ -439,11 +728,25 @@ free_partlist()
 	struct part *part;
 	struct part *tmp;
 
-
 	TAILQ_FOREACH_SAFE(part, &partlist, link, tmp) {
+		free(part->spec);
 		free(part->type);
+		free(part);
 	}
 }
+
+static bool
+update_percents(struct pvalue *pval, uint64_t val, bool fail)
+{
+	if (pval->valid){
+		if (pval->pcent){
+			pval->val = ((uint64_t)(val*pval->pcent))/100;
+			return !((val == 0) && fail);
+		}
+	}
+	return true;
+}
+
 
 static void
 mkimg(void)
@@ -451,47 +754,66 @@ mkimg(void)
 	FILE *fp;
 	struct part *part;
 	lba_t block, blkoffset;
-	uint64_t bytesize, byteoffset;
-	char *size, *offset;
-	bool abs_offset;
-	int error, fd;
+	uint64_t bytesize;
+	int error, fd, errors;
 
-	/* First check partition information */
+
+	errors = 0;
+	/* First check and update partition information */
 	TAILQ_FOREACH(part, &partlist, link) {
 		error = scheme_check_update_part(part);
 		if (error){
-			free_partlist();
-			errc(EX_DATAERR, error, "partition %d", part->index+1);
+			errors++;
+			fprintf(stderr,"partition %d error:%s\n", part->index+1,strerror(error));
+		}
+		if (!update_percents(&part->minsize,max_capacity,true)){
+			fprintf(stderr,"partition %d error: cannot calculate minimum partition size as %3.2f%% of disk capacity, disk capacity is not specified\n",part->index+1,part->maxsize.pcent);
+			errors++;
+		}
+		if (!update_percents(&part->maxsize,max_capacity,true)){
+			fprintf(stderr,"partition %d error: cannot calculate maximum partition size as %3.2f%% of disk capacity, disk capacity is not specified\n",part->index+1,part->maxsize.pcent);
+			errors++;
+		}
+		if (!update_percents(&part->offset,max_capacity,true)){
+			fprintf(stderr,"partition %d error: cannot calculate offset as %3.2f%% of disk capacity, disk capacity is not specified\n",part->index+1,part->offset.pcent);
+			errors++;
+		}
+
+		if (part->maxsize.valid && part->minsize.valid){
+			if (part->maxsize.val < part->minsize.val){
+				fprintf(stderr,"partition %d error: partition minimum size is greater then maximum size\n",part->index+1);
+				errors++;
+			}
 		}
 	}
 
-	block = scheme_metadata(SCHEME_META_IMG_START, 0);
-	abs_offset = false;
-	TAILQ_FOREACH(part, &partlist, link) {
-		byteoffset = blkoffset = 0;
-		abs_offset = false;
+	if (errors){
+		free_partlist();
+		errx(EX_DATAERR, "errors were found");
+	}
 
-		/* Look for an offset. Set size too if we can. */
-		switch (part->kind) {
-		case PART_KIND_SIZE:
-			offset = part->contents;
-			size = strsep(&offset, ":");
-			if (expand_number(size, &bytesize) == -1)
-				error = errno;
-			if (offset != NULL) {
-				if (*offset != '+')
-					abs_offset = true;
-				else
-					offset++;
-				if (expand_number(offset, &byteoffset) == -1)
-					error = errno;
-			}
-			break;
+#ifdef DEBUG
+	if (verbose > 1){
+		fprintf(stderr, "======[ Partitions info ]========================================================================\n");
+		fprintf(stderr, " #  | type                                 | maxsize         | minsize         | offt            \n");
+		fprintf(stderr, "----+--------------------------------------+-----------------+-----------------+-----------------\n");
+		TAILQ_FOREACH(part, &partlist, link) {
+			fprintf(stderr, "%3d | %-36s | %15llu | %15llu | %15llu\n", part->index+1,
+					part->alias, TOULL(part->minsize.val), TOULL(part->maxsize.val),
+					TOULL(part->offset.val));
 		}
+		fprintf(stderr, "=================================================================================================\n");
+	}
+#endif
+
+	block = scheme_metadata(SCHEME_META_IMG_START, 0);
+	TAILQ_FOREACH(part, &partlist, link) {
+		blkoffset = 0;
+		bytesize = 0;
 
 		/* Work out exactly where the partition starts. */
-		blkoffset = (byteoffset + secsz - 1) / secsz;
-		if (abs_offset) {
+		blkoffset = BYTES_TO_SECTORS(part->offset.val);
+		if (part->abs_offset) {
 			part->block = scheme_metadata(SCHEME_META_PART_ABSOLUTE,
 			    blkoffset);
 		} else {
@@ -511,8 +833,9 @@ mkimg(void)
 			if (fd != -1) {
 				error = image_copyin(block, fd, &bytesize);
 				close(fd);
-			} else
+			} else{
 				error = errno;
+			}
 			break;
 		case PART_KIND_PIPE:
 			fp = popen(part->contents, "r");
@@ -520,30 +843,36 @@ mkimg(void)
 				fd = fileno(fp);
 				error = image_copyin(block, fd, &bytesize);
 				pclose(fp);
-			} else
+			} else{
 				error = errno;
+			}
 			break;
 		}
 		if (error)
 			errc(EX_IOERR, error, "partition %d", part->index + 1);
-		part->size = (bytesize + secsz - 1) / secsz;
+
+		if (part->minsize.valid && bytesize < part->minsize.val){
+			bytesize = part->minsize.val;
+		}
+
+		part->size = BYTES_TO_SECTORS(bytesize);
 		if (verbose) {
 			bytesize = part->size * secsz;
 			fprintf(stderr, "size %llu bytes (%llu blocks)\n",
 			     (long long)bytesize, (long long)part->size);
-			if (abs_offset) {
+			if (part->abs_offset) {
 				fprintf(stderr,
 				    "    location %llu bytes (%llu blocks)\n",
-				    (long long)byteoffset,
+				    (long long)part->offset.val,
 				    (long long)blkoffset);
 			} else if (blkoffset > 0) {
 				fprintf(stderr,
 				    "    offset %llu bytes (%llu blocks)\n",
-				    (long long)byteoffset,
+				    (long long)part->offset.val,
 				    (long long)blkoffset);
 			}
 		}
-		if (!abs_offset) {
+		if (!part->abs_offset) {
 			block = scheme_metadata(SCHEME_META_PART_AFTER,
 			    part->block + part->size);
 		}
@@ -705,6 +1034,10 @@ main(int argc, char *argv[])
 				errc(EX_DATAERR, error, "capacity in bytes");
 			max_capacity = min_capacity;
 			break;
+		case LONGOPT_TYPES:
+			print_types(optarg);
+			exit(EX_OK);
+			/*NOTREACHED*/
 		default:
 			usage("unknown option");
 		}
@@ -749,6 +1082,13 @@ main(int argc, char *argv[])
 		fprintf(stderr, "Physical block size: %u\n", blksz);
 		fprintf(stderr, "Sectors per track:   %u\n", nsecs);
 		fprintf(stderr, "Number of heads:     %u\n", nheads);
+		if (max_capacity) {
+			fprintf(stderr, "Max disk capacity:   %llu\n", TOULL(max_capacity));
+		}
+		if (min_capacity) {
+			fprintf(stderr, "Min disk capacity:   %llu\n", TOULL(min_capacity));
+		}
+		fprintf(stderr, "Number of heads:     %u\n", nheads);
 		fputc('\n', stderr);
 		if (scheme_selected())
 			fprintf(stderr, "Partitioning scheme: %s\n",
@@ -776,3 +1116,4 @@ main(int argc, char *argv[])
 	free_partlist();
 	return (0);
 }
+

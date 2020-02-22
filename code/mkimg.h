@@ -31,20 +31,32 @@
 
 #include <sys/queue.h>
 #include <sys/types.h>
+#include <stdbool.h>
+
+
+struct pvalue{
+	double   pcent;
+	uint64_t val;
+	bool valid;
+};
 
 struct part {
 	TAILQ_ENTRY(part) link;
+	char	*spec;		/* Partition specification. */
 	char	*alias;		/* Partition type alias. */
 	char	*contents;	/* Contents/size specification. */
 	u_int	kind;		/* Content kind. */
 #define	PART_UNDEF	0
 #define	PART_KIND_FILE	1
 #define	PART_KIND_PIPE	2
-#define	PART_KIND_SIZE	3
 	u_int	index;		/* Partition index (0-based). */
 	void	*type;		/* Scheme-specific partition type. */
 	lba_t	block;		/* Block-offset of partition in image. */
-	lba_t	size;		/* Size in blocks of partition. */
+	lba_t	size;			/* Size in blocks of partition. */
+	struct pvalue minsize;	/* Minimum byte size of partition. */
+	struct pvalue maxsize;	/* Maximum byte size of partition. */
+	struct pvalue offset;	/* bytes offset of partition */
+	bool abs_offset;	/* absolute offset */
 	char	*label;		/* Partition label. */
 };
 

@@ -32,6 +32,7 @@
 #include <stdint.h>
 
 typedef int64_t lba_t;
+#define MAXLBA 9223372036854775807
 
 int image_copyin(lba_t blk, int fd, uint64_t *sizep);
 int image_copyout(int fd);
