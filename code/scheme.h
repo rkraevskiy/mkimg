@@ -117,5 +117,6 @@ u_int scheme_max_secsz(void);
 lba_t scheme_metadata(u_int, lba_t);
 int scheme_write(lba_t);
 const struct mkimg_alias *scheme_get_alias(const char *name);
+int scheme_show_info(const char *spec);
 
 #endif /* _MKIMG_SCHEME_H_ */

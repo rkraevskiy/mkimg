@@ -139,6 +139,10 @@ option is a shorthand to specify the minimum and maximum capacity at the
 same time.
 .Pp
 The
+.Fl p
+option describes partition specification.
+.Pp
+The
 .Fl v
 option increases the level of output that the
 .Nm
@@ -279,6 +283,58 @@ is moved accordingly.
 This is typically not part of the conversion process.
 If possible, use an output format specifically for the environment in which
 the file is intended to be used.
+.Sh PARTITION SPECIFICATION
+The partition specification format is:
+.Pp
+<type>[/<name>][:<size>[:[+]<offset>]][:@[+]<offset>][:<key>=<val>][:<source>]
+.Pp
+.Ar type
+is a partition type. The partition type is depend on used partitioning scheme
+and can be specified as text name or type specific value (gpt UUID, hex value
+of the mbr partition type, etc).
+.Pp
+.Ar name
+is an optional partition name. Not all partition schemes suuport partition
+name.
+.Pp
+.Ar size
+is an optional partition exact partition size. If size is not specified then
+partition size is calculated from size of the data source. After the size
+option an optional
+.Ar offset
+option can be provided.
+.Pp
+.Ar offset
+is an optional partition offset. if
+.Ar offset
+has '+', then
+.Ar offset
+is relative from the previous partition.
+.Pp
+.Ar source
+is an optional parameter which specify source of the data for the
+partition.
+.Nm
+utility supports 2 types of data source: file and result of the execution of
+the extermal command. The file data source is specified with =<filename>.
+The command to execute is specified with -<command>
+.Pp
+.Ar key
+and
+.Ar val
+is an optional parameters. Supported keys are 'size', 'min', 'max',
+\'offt', 'offset'. min and max are the minimum partition size and maximum
+partition  size. If size of partition is less then minimum size then
+partition is extended to the mimimum size. THe error is reported if the
+size of  the partition is more then maximum partition size.
+.Pp
+All values can be specified in bytes, kilobytes (k), megabytes (m),
+gigabytes (g), sectors (s) and percents (%). The percent are calculated
+from the disk capacity:
+.Pp
+.Dl % mkimg --capacity=1G -s bsd -b /boot/boot -p freebsd-ufs:min=30%\
+:=root-file-system.ufs -p freebsd-swap:size=2000s -p- -p- -p- -p- \
+-p freebsd-ufs:offt=30000k:max=50%:=usr-file-system.ufs -o bsd.img
 .Sh ENVIRONMENT
 .Bl -tag -width "TMPDIR" -compact
 .It Ev TMPDIR

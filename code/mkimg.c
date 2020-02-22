@@ -53,6 +53,7 @@ __FBSDID("$FreeBSD$");
 #define	LONGOPT_SCHEMES		0x01000002
 #define	LONGOPT_VERSION		0x01000003
 #define	LONGOPT_CAPACITY	0x01000004
+#define	LONGOPT_TYPES		0x01000005
 
 #define BYTES_TO_SECTORS(x) (((x) + secsz - 1) / secsz)
 #define SECTORS_TO_BYTES(x) ((x) * secsz)
@@ -63,6 +64,7 @@ static struct option longopts[] = {
 	{ "formats", no_argument, NULL, LONGOPT_FORMATS },
 	{ "schemes", no_argument, NULL, LONGOPT_SCHEMES },
 	{ "version", no_argument, NULL, LONGOPT_VERSION },
+	{ "types", optional_argument, NULL, LONGOPT_TYPES },
 	{ "capacity", required_argument, NULL, LONGOPT_CAPACITY },
 	{ NULL, 0, NULL, 0 }
 };
@@ -131,6 +133,13 @@ print_schemes(int usage)
 	}
 }
 
+
+static void
+print_types(const char *name)
+{
+	scheme_show_info(name);
+}
+
 static void
 print_version(void)
 {
@@ -153,11 +162,13 @@ usage(const char *why)
 	fprintf(stderr, "usage: %s <options>\n", getprogname());
 
 	fprintf(stderr, "    options:\n");
-	fprintf(stderr, "\t--formats\t-  list image formats\n");
-	fprintf(stderr, "\t--schemes\t-  list partition schemes\n");
-	fprintf(stderr, "\t--version\t-  show version information\n");
+	fprintf(stderr, "\t--formats         \t-  list image formats\n");
+	fprintf(stderr, "\t--schemes         \t-  list partition schemes\n");
+	fprintf(stderr, "\t--version         \t-  show version information\n");
+	fprintf(stderr, "\t--capacity=<num>  \t-  capacity (in bytes) of the disk\n");
+	fprintf(stderr, "\t--types[=<scheme>]\t-  show partition types information [for <scheme>]\n");
 	fputc('\n', stderr);
-	fprintf(stderr, "\t-a <num>\t-  mark num'th partion as active\n");
+	fprintf(stderr, "\t-a <num>\t-  mark num'th partition as active\n");
 	fprintf(stderr, "\t-b <file>\t-  file containing boot code\n");
 	fprintf(stderr, "\t-c <num>\t-  minimum capacity (in bytes) of the disk\n");
 	fprintf(stderr, "\t-C <num>\t-  maximum capacity (in bytes) of the disk\n");
@@ -180,6 +191,18 @@ usage(const char *why)
 	fprintf(stderr, "\t<t>[/<l>]::<size>[:[+]<offset>]\t-  "
 	    "empty partition of given size and\n\t\t\t\t\t"
 	    "   optional relative or absolute offset\n");
+	fprintf(stderr, "\t<t>[/<l>][:max=<maxsize>]\\\n"
+		 "\t\t[:offt=<[+]offt>]\\\n"
+		 "\t\t[:min=<minsize>]\\\n"
+		 "\t\t:=<file>\t\t-  partition content determined by the\n"
+		 "\t\t\t\t\t   named file partition and optionaly limited in\n"
+		 "\t\t\t\t\t   size - not less then <minsize> and no greater\n"
+		 "\t\t\t\t\t   then <maxsize>. An optional <offset> parameter\n"
+ 		 "\t\t\t\t\t   shift start of the partition by <offset> bytes\n"
+ 		 "\t\t\t\t\t   using absolute or relative offset.\n"
+ 		 "\t\t\t\t\t   An absolute offset is in <offset> from and\n"
+ 		 "\t\t\t\t\t   relative offset is in <+offset> form.\n"
+		 );
 	fprintf(stderr, "\t<t>[/<l>]:=<file>\t\t-  partition content and size "
 	    "are\n\t\t\t\t\t   determined by the named file\n");
 	fprintf(stderr, "\t<t>[/<l>]:-<cmd>\t\t-  partition content and size "
@@ -741,7 +764,7 @@ mkimg(void)
 		error = scheme_check_update_part(part);
 		if (error){
 			errors++;
-			fprintf(stderr,"partition %d error:%s", part->index+1,strerror(error));
+			fprintf(stderr,"partition %d error:%s\n", part->index+1,strerror(error));
 		}
 		if (!update_percents(&part->minsize,max_capacity,true)){
 			fprintf(stderr,"partition %d error: cannot calculate minimum partition size as %3.2f%% of disk capacity, disk capacity is not specified\n",part->index+1,part->maxsize.pcent);
@@ -1011,6 +1034,10 @@ main(int argc, char *argv[])
 				errc(EX_DATAERR, error, "capacity in bytes");
 			max_capacity = min_capacity;
 			break;
+		case LONGOPT_TYPES:
+			print_types(optarg);
+			exit(EX_OK);
+			/*NOTREACHED*/
 		default:
 			usage("unknown option");
 		}

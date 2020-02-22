@@ -87,6 +87,37 @@ static struct mkimg_scheme *first;
 static struct mkimg_scheme *scheme;
 static void *bootcode;
 
+
+static struct mkimg_scheme*
+scheme_find(const char *spec)
+{
+	struct mkimg_scheme *s;
+
+	s = NULL;
+	while ((s = scheme_iterate(s)) != NULL) {
+		if (strcasecmp(spec, s->name) == 0) {
+			break;
+		}
+	}
+	return s;
+}
+
+static const char *
+scheme_find_alias_name(u_int id)
+{
+	u_int idx;
+
+	idx = 0;
+	while (scheme_alias[idx].name != NULL) {
+		if (scheme_alias[idx].alias == id) {
+			return scheme_alias[idx].name;
+		}
+		idx++;
+	}
+	return NULL;
+}
+
+
 static enum alias
 scheme_parse_alias(const char *name)
 {
@@ -120,12 +151,10 @@ scheme_select(const char *spec)
 {
 	struct mkimg_scheme *s;
 
-	s = NULL;
-	while ((s = scheme_iterate(s)) != NULL) {
-		if (strcasecmp(spec, s->name) == 0) {
+	s = scheme_find(spec);
+	if (s) {
 			scheme = s;
 			return (0);
-		}
 	}
 	return (EINVAL);
 }
@@ -235,5 +264,46 @@ scheme_get_alias(const char *name)
 		return (NULL);
 
    return (iter);
+}
+
+
+static void
+show_info(struct mkimg_scheme *s)
+{
+	struct mkimg_alias *iter;
+	const char *name;
+
+	printf("%s - label size:%d, '%s':\n",s->name,s->labellen,s->description);
+
+	iter = s->aliases;
+	while (iter->alias != ALIAS_NONE) {
+		name = scheme_find_alias_name(iter->alias);
+		if (name){
+			printf("\t%s\n",name);
+		}
+		iter++;
+	}
+}
+
+int
+scheme_show_info(const char *spec)
+{
+	struct mkimg_scheme *s;
+
+	s = NULL;
+
+	if (spec){
+		s = scheme_find(spec);
+		if (s){
+			show_info(s);
+		}else{
+			return (EINVAL);
+		}
+	}else{
+		while ((s = scheme_iterate(s)) != NULL) {
+			show_info(s);
+		}
+	}
+	return 0;
 }
 
